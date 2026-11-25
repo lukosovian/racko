@@ -2106,6 +2106,9 @@
                 let z = Math.min(cam.caps.zoom.max, Math.max(cam.caps.zoom.min, zs));
                 try { await tr.applyConstraints({ advanced: [{ zoom: z }] }); cam.zoom = z; } catch (e) {}
             }
+            cam.ev = 0;
+            let evs = cam.cfg.ev && cam.cfg.ev[cam.cfg.devId];
+            if (cam.caps.exposureCompensation && evs) { try { await tr.applyConstraints({ advanced: [{ exposureCompensation: evs }] }); cam.ev = evs; } catch (e) {} }
             cam.video.srcObject = st;
             await cam.video.play();
             try { cam.devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (e) { cam.devs = []; }
@@ -2146,6 +2149,14 @@
                 renderCamTools();
             }, 150);
         }
+        async function camSetEv(v) {
+            let tr = cam.stream && cam.stream.getVideoTracks()[0];
+            if (!tr || !cam.caps.exposureCompensation) return;
+            cam.ev = +v;
+            try { await tr.applyConstraints({ advanced: [{ exposureCompensation: cam.ev }] }); } catch (e) {}
+            cam.cfg.ev = cam.cfg.ev || {}; cam.cfg.ev[cam.cfg.devId] = cam.ev; camSaveCfg();
+            renderCamTools();
+        }
         async function camToggleTorch() {
             let tr = cam.stream && cam.stream.getVideoTracks()[0];
             if (!tr || !cam.caps.torch) return;
@@ -2163,7 +2174,9 @@
                 z: z && z.max > z.min ? { min: z.min, max: z.max, step: z.step || 0.1 } : null,
                 torchCap: !!c.torch, torch: !!cam.torch, view: cam.view, taps: !!cam.taps,
                 hint: h && h.style.display !== 'none' ? h.innerText : '', status: st ? st.innerHTML : '',
-                balls: cam.ballScr || [], cs: cam.cornerScr || null, cal: !!cam.corners
+                balls: cam.ballScr || [], cs: cam.cornerScr || null, cal: !!cam.corners,
+                ev: c.exposureCompensation && c.exposureCompensation.max > c.exposureCompensation.min ? { min: c.exposureCompensation.min, max: c.exposureCompensation.max, step: c.exposureCompensation.step || 0.1 } : null,
+                evv: cam.ev || 0
             };
         }
         function renderCamTools(onlyLabel) {
@@ -2182,6 +2195,8 @@
                     <input type="range" min="${z.min}" max="${z.max}" step="${z.step}" value="${I.zoom}" ${cam.remote ? 'onchange' : 'oninput'}="camAct('zoom', this.value)">
                     <b id="camZoomVal">${(+I.zoom).toFixed(1)}x</b></div>`;
             }
+            if (I.ev) html += `<div class="cam-zoom"><b>☀ Parlaklık ${I.evv > 0 ? '+' : ''}${(+I.evv).toFixed(1)}</b>
+                    <input type="range" min="${I.ev.min}" max="${I.ev.max}" step="${I.ev.step}" value="${I.evv}" onchange="camAct('ev', this.value)"></div>`;
             if (I.cal) html += `<button class="cam-tool" onclick="camAct('pockets')">◎ Delik ↻</button>`;
             if (I.torchCap) html += `<button class="cam-tool${I.torch ? ' on' : ''}" onclick="camAct('torch')">🔦 Işık</button>`;
             el.innerHTML = html;
@@ -2202,6 +2217,7 @@
             else if (a === 'manual') camStartCalib();
             else if (a === 'teach') camTeach(v[0], v[1], v[2]);
             else if (a === 'pockets') camCyclePockets();
+            else if (a === 'ev') camSetEv(v);
             else if (a === 'corner' || a === 'cornerEnd') {
                 // v: [köşe no, tuval x oranı, tuval y oranı] -> video oranı
                 let cv = document.getElementById('camCanvas'), W = cv.clientWidth, Hh = cv.clientHeight;
@@ -2571,8 +2587,9 @@
                     for (let x = Math.max(0, px - rr | 0); x < Math.min(CAM_W, px + rr + 1); x++)
                         if ((x - px) ** 2 + (y - py) ** 2 < rr * rr) mask[y * CAM_W + x] = 0;
             }
-            for (let x = 0; x < CAM_W; x++) for (let k = 0; k < 3; k++) { mask[k * CAM_W + x] = 0; mask[(CAM_H - 1 - k) * CAM_W + x] = 0; }
-            for (let y = 0; y < CAM_H; y++) for (let k = 0; k < 3; k++) { mask[y * CAM_W + k] = 0; mask[y * CAM_W + CAM_W - 1 - k] = 0; }
+            let edge = Math.round(CAM_R * 1.1);
+            for (let x = 0; x < CAM_W; x++) for (let k = 0; k < edge; k++) { mask[k * CAM_W + x] = 0; mask[(CAM_H - 1 - k) * CAM_W + x] = 0; }
+            for (let y = 0; y < CAM_H; y++) for (let k = 0; k < edge; k++) { mask[y * CAM_W + k] = 0; mask[y * CAM_W + CAM_W - 1 - k] = 0; }
             T.push(performance.now());
             camMorph(mask);
             T.push(performance.now());
@@ -2596,11 +2613,13 @@
                 blobs.push({ area, x: sx / area, y: sy / area, w: x1 - x0 + 1, h: y1 - y0 + 1, px });
             }
             cam.blobs = blobs.length;
+            camMeasureShape(blobs);
+            let A1 = cam.shape ? cam.shape.area : CAM_AREA * 1.15, AR = cam.shape ? cam.shape.r : 1;
             T.push(performance.now());
             let balls = [];
             // Tek topun lekesi gölgesiyle ~1.15 top alanı; masada en fazla 16 top olabilir
             // Sıkışık kümede gölgeler üst üste biner, top başına alan ~1.0 top alanına düşer
-            let est = blobs.map(b => { let k = Math.round(b.area / (CAM_AREA * 1.15)); return k <= 1 ? 1 : Math.max(2, Math.round(b.area / (CAM_AREA * (k >= 4 ? 0.98 : 1.1)))); });
+            let est = blobs.map(b => { let k = Math.round(b.area / A1); return k <= 1 ? 1 : Math.max(2, Math.round(b.area / (A1 * (k >= 4 ? 0.85 : 0.96)))); });
             let room = 16 - est.filter(k => k === 1).length;
             blobs.forEach((b, i) => {
                 if (est[i] < 8 || Math.max(b.w, b.h) > CAM_R * 12.5) return;
@@ -2613,7 +2632,7 @@
                 let b = blobs[bi];
                 let fill = b.area / (b.w * b.h), big = Math.max(b.w, b.h);
                 // 15 topluk üçgen ~10 yarıçap genişliğinde; daha büyük ya da seyrek leke el/ıstaka gibi bir engeldir
-                if (big > CAM_R * 12.5 || fill < 0.3 || b.area > CAM_AREA * 17) { balls.push({ x: b.x, y: b.y, kind: 'obstacle', w: b.w, h: b.h }); continue; }
+                if (big > CAM_R * 12.5 * Math.max(1, AR * 0.8) || fill < 0.3 || b.area > A1 * 15) { balls.push({ x: b.x, y: b.y, kind: 'obstacle', w: b.w, h: b.h }); continue; }
                 let k = est[bi];
                 if (k > 1) { k = Math.max(2, Math.min(k, room)); room -= k; }
                 if (k === 1) balls.push(camClassify(b.x, b.y));
@@ -2656,10 +2675,53 @@
             cam.prof = T.slice(1).map((t, i) => Math.round(t - T[i])).join('/');
         }
 
+        // Tek top lekelerinin şekli: elips uzama oranı (r), yönü (ang) ve ortalama alanı. Yavaşça güncellenir.
+        function camMeasureShape(blobs) {
+            let rs = [], cs = [], ss = [], as = [];
+            for (let b of blobs) {
+                if (b.area < CAM_AREA * 0.5 || b.area > CAM_AREA * 7 || b.px.length < 20) continue;
+                let n = b.px.length, mx = 0, my = 0;
+                for (let p of b.px) { mx += p % CAM_W; my += (p / CAM_W) | 0; }
+                mx /= n; my /= n;
+                let xx = 0, yy = 0, xy = 0;
+                for (let p of b.px) { let dx = p % CAM_W - mx, dy = ((p / CAM_W) | 0) - my; xx += dx * dx; yy += dy * dy; xy += dx * dy; }
+                xx /= n; yy /= n; xy /= n;
+                let tr = xx + yy, det = xx * yy - xy * xy, q = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+                let l1 = tr / 2 + q, l2 = Math.max(1e-6, tr / 2 - q);
+                let a = 2 * Math.sqrt(l1), bb = 2 * Math.sqrt(l2);
+                let fill = b.area / (Math.PI * a * bb);
+                // tek top: kısa yarıçap ~ top yarıçapı, dolu bir elips
+                if (bb < CAM_R * 0.65 || bb > CAM_R * 1.5 || fill < 0.75 || fill > 1.3 || a / bb > 5) continue;
+                let ang = 0.5 * Math.atan2(2 * xy, xx - yy);
+                rs.push(a / bb); cs.push(Math.cos(2 * ang)); ss.push(Math.sin(2 * ang)); as.push(b.area);
+            }
+            if (rs.length < 2) return;
+            let med = v => v.slice().sort((x, y) => x - y)[v.length >> 1];
+            let r = Math.max(1, med(rs)), area = med(as);
+
+            let ang = 0.5 * Math.atan2(ss.reduce((x, y) => x + y, 0), cs.reduce((x, y) => x + y, 0));
+            let o = cam.shape;
+            if (!o) cam.shape = { r, area, ang };
+            else { o.r += (r - o.r) * 0.2; o.area += (area - o.area) * 0.2; o.ang = ang; }
+            // uzama azsa daire say
+            if (cam.shape.r < 1.15) cam.shape.r = 1;
+        }
+
         // Birbirine değen topları ayır: lekenin piksellerini k merkeze böl (k-ortalama, en uzak noktadan başlatma)
+        // Eğik açıda toplar uzar: kümeleme uzama yönünde sıkıştırılmış koordinatlarda yapılır
         function camSplit(px, k) {
             let n = px.length, X = new Float32Array(n), Y = new Float32Array(n);
-            for (let i = 0; i < n; i++) { X[i] = px[i] % CAM_W; Y[i] = (px[i] / CAM_W) | 0; }
+            let sh = cam.shape && cam.shape.r > 1 ? cam.shape : null, ca = sh ? Math.cos(sh.ang) : 1, sa = sh ? Math.sin(sh.ang) : 0, rr = sh ? sh.r : 1;
+            for (let i = 0; i < n; i++) {
+                let x = px[i] % CAM_W, y = (px[i] / CAM_W) | 0;
+                if (sh) { let u = (x * ca + y * sa) / rr, v = -x * sa + y * ca; x = u * ca - v * sa; y = u * sa + v * ca; }
+                X[i] = x; Y[i] = y;
+            }
+            let res = camSplitXY(X, Y, n, k);
+            if (!sh) return res;
+            return res.map(([x, y]) => { let u = (x * ca + y * sa) * rr, v = -x * sa + y * ca; return [u * ca - v * sa, u * sa + v * ca]; });
+        }
+        function camSplitXY(X, Y, n, k) {
             let cx = [], cy = [], mx = 0, my = 0;
             for (let i = 0; i < n; i++) { mx += X[i]; my += Y[i]; }
             mx /= n; my /= n;
@@ -2695,9 +2757,11 @@
         // Topun numarasını tahmin et: renk tonu + beyaz oranı (çizgili mi) + siyah oranı
         function camClassify(cx, cy) {
             let R = CAM_R * 0.95, white = 0, black = 0, col = 0, tot = 0, sx = 0, sy = 0, dark = 0;
-            for (let y = Math.max(0, cy - R | 0); y <= Math.min(CAM_H - 1, cy + R); y++) {
-                for (let x = Math.max(0, cx - R | 0); x <= Math.min(CAM_W - 1, cx + R); x++) {
-                    if ((x - cx) ** 2 + (y - cy) ** 2 > R * R) continue;
+            let sh = cam.shape && cam.shape.r > 1 ? cam.shape : null, ca = sh ? Math.cos(sh.ang) : 1, sa = sh ? Math.sin(sh.ang) : 0, RL = sh ? R * sh.r : R;
+            for (let y = Math.max(0, cy - RL | 0); y <= Math.min(CAM_H - 1, cy + RL); y++) {
+                for (let x = Math.max(0, cx - RL | 0); x <= Math.min(CAM_W - 1, cx + RL); x++) {
+                    let dx = x - cx, dy = y - cy, u = dx * ca + dy * sa, w = -dx * sa + dy * ca;
+                    if ((u / RL) ** 2 + (w / R) ** 2 > 1) continue;
                     let i = y * CAM_W + x;
                     if (!cam.mask[i]) continue;
                     tot++;
@@ -2800,7 +2864,7 @@
             let f = camFitRect(W, Hh, CAM_W, CAM_H), s = f.w / CAM_W;
             g.imageSmoothingEnabled = true;
             g.drawImage(cam.out, f.x, f.y, f.w, f.h);
-            cam.balls.forEach(b => camMark(g, f.x + b.x * s, f.y + b.y * s, CAM_R * s * 1.25, b));
+            cam.balls.forEach(b => camMark(g, f.x + b.x * s, f.y + b.y * s, CAM_R * s * 1.25, b, cam.shape));
             camDrawPockets(g, (x, y) => [f.x + Math.min(Math.max(x, 12), CAM_W - 12) * s, f.y + Math.min(Math.max(y, 12), CAM_H - 12) * s], 11);
             cam.cornerScr = null;
             cam.ballScr = cam.balls.filter(b => b.kind === 'ball').map(b => [+((f.x + b.x * s) / W).toFixed(4), +((f.y + b.y * s) / Hh).toFixed(4), Math.round(b.x), Math.round(b.y)]);
@@ -3086,11 +3150,14 @@
             let stop = () => { cancelAnimationFrame(raf); bar.style.width = '0'; if (t0 && cam.locked && LinkNative) LinkNative.dim({ level: 0.02 }).catch(() => {}); t0 = 0; };
             el.addEventListener('pointerup', stop); el.addEventListener('pointercancel', stop); el.addEventListener('pointerleave', stop);
         })();
-        function camMark(g, x, y, r, b) {
+        function camMark(g, x, y, r, b, sh) {
             g.lineWidth = 2.5;
             if (b.kind === 'obstacle') { g.strokeStyle = 'rgba(255,80,80,0.9)'; g.setLineDash([6, 4]); g.strokeRect(x - 14, y - 14, 28, 28); g.setLineDash([]); return; }
             g.strokeStyle = b.kind === 'cluster' ? '#ff9800' : (b.n === null ? '#bbb' : b.conf > 0.35 ? '#00e676' : '#ffeb3b');
-            g.beginPath(); g.arc(x, y, r, 0, 7); g.stroke();
+            g.beginPath();
+            if (sh && sh.r > 1) g.ellipse(x, y, r * sh.r, r, sh.ang, 0, 7); else g.arc(x, y, r, 0, 7);
+            g.stroke();
+            if (sh && sh.r > 1) r = r * Math.max(Math.abs(Math.sin(sh.ang)) * sh.r, 1);
             let t = b.kind === 'cluster' ? `${b.count} top` : b.n === null ? '?' : b.n === 0 ? 'B' : String(b.n);
             g.font = 'bold 13px MiSans, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
             let tw = g.measureText(t).width + 8;
@@ -3106,7 +3173,7 @@
             let bs = cam.balls.filter(b => b.kind === 'ball'), cl = cam.balls.filter(b => b.kind === 'cluster'), ob = cam.balls.filter(b => b.kind === 'obstacle');
             let total = bs.length + cl.reduce((a, b) => a + b.count, 0), touching = bs.filter(b => b.inCluster).length;
             let nums = bs.filter(b => b.n !== null).map(b => b.n).sort((a, b) => a - b).map(n => n === 0 ? 'B' : n);
-            el.innerHTML = `<b>${total}</b> top${touching ? ` <span class="cam-warn">(${touching} temas eden)</span>` : ''}${ob.length ? ` <span class="cam-warn">· masada engel</span>` : ''} · ${nums.join(' ')} <small>${Math.round(cam.procMs)} ms</small>`;
+            el.innerHTML = `<b>${total}</b> top${touching ? ` <span class="cam-warn">(${touching} temas eden)</span>` : ''}${ob.length ? ` <span class="cam-warn">· masada engel</span>` : ''}${cam.shape && cam.shape.r > 1.8 ? ` <span class="cam-warn">· kamera çok yatık, telefonu yükselt</span>` : ''} · ${nums.join(' ')} <small>${Math.round(cam.procMs)} ms</small>`;
         }, 300);
 
         // SES EFEKTLERİ (Web Audio API)
