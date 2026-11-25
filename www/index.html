@@ -2587,9 +2587,16 @@
                     for (let x = Math.max(0, px - rr | 0); x < Math.min(CAM_W, px + rr + 1); x++)
                         if ((x - px) ** 2 + (y - py) ** 2 < rr * rr) mask[y * CAM_W + x] = 0;
             }
-            let edge = Math.round(CAM_R * 1.1);
-            for (let x = 0; x < CAM_W; x++) for (let k = 0; k < edge; k++) { mask[k * CAM_W + x] = 0; mask[(CAM_H - 1 - k) * CAM_W + x] = 0; }
-            for (let y = 0; y < CAM_H; y++) for (let k = 0; k < edge; k++) { mask[y * CAM_W + k] = 0; mask[y * CAM_W + CAM_W - 1 - k] = 0; }
+            // Kenar payı; kameraya uzak bantta bandın iç yüzü ve gölgesi de görünür, orada pay daha geniş
+            let eT = CAM_R * 1.1, eB = eT, eL = eT, eR = eT;
+            if (cam.shape && cam.shape.r > 1.3) {
+                let Hm = camHomography([[0, 0], [CAM_W, 0], [CAM_W, CAM_H], [0, CAM_H]], cam.corners);
+                let mids = [[CAM_W / 2, 0], [CAM_W / 2, CAM_H], [0, CAM_H / 2], [CAM_W, CAM_H / 2]].map(([x, y]) => camApplyH(Hm, x, y)[1]);
+                let far = mids.indexOf(Math.min(...mids)), extra = CAM_R * Math.min(4, 1.4 * (cam.shape.r - 1));
+                if (far === 0) eT += extra; else if (far === 1) eB += extra; else if (far === 2) eL += extra; else eR += extra;
+            }
+            for (let x = 0; x < CAM_W; x++) { for (let k = 0; k < eT; k++) mask[k * CAM_W + x] = 0; for (let k = 0; k < eB; k++) mask[(CAM_H - 1 - k) * CAM_W + x] = 0; }
+            for (let y = 0; y < CAM_H; y++) { for (let k = 0; k < eL; k++) mask[y * CAM_W + k] = 0; for (let k = 0; k < eR; k++) mask[y * CAM_W + CAM_W - 1 - k] = 0; }
             T.push(performance.now());
             camMorph(mask);
             T.push(performance.now());
@@ -2989,59 +2996,92 @@
                 hu[i] = hh;
                 if (mx > 45 && df * 255 / mx > 75) { ok[i] = 1; hist[(hh / 5) | 0]++; }
             }
-            let pk = 0; for (let i = 1; i < 72; i++) if (hist[i] > hist[pk]) pk = i;
-            let ch = pk * 5 + 2.5;
-            let m = new Uint8Array(N);
-            for (let i = 0; i < N; i++) { if (!ok[i]) continue; let dd = Math.abs(hu[i] - ch) % 360; if ((dd > 180 ? 360 - dd : dd) < 20) m[i] = 1; }
-            // küçük delikleri kapat (toplar, gölgeler)
-            let t = new Uint8Array(N);
-            for (let k = 0; k < 2; k++) {
-                for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { let i = y * w + x; t[i] = m[i] | m[i - 1] | m[i + 1] | m[i - w] | m[i + w]; }
-                m.set(t);
+            // Aday renkler: en kalabalık 4 ton (birbirinden en az 20° uzak). Zemin/duvar da renkli olabilir;
+            // çuha dörtgen ve dolu bir alandır, ayrıca genelde mavi-yeşil tonlardadır
+            let peaks = [], hh2 = Array.from(hist);
+            for (let k = 0; k < 4; k++) {
+                let pk = 0; for (let i = 1; i < 72; i++) if (hh2[i] > hh2[pk]) pk = i;
+                if (hh2[pk] < N * 0.03) break;
+                peaks.push(pk * 5 + 2.5);
+                for (let d = -4; d <= 4; d++) hh2[(pk + d + 72) % 72] = 0;
             }
-            // en büyük bağlı bölge
-            let lab = new Int32Array(N), st = new Int32Array(N), best = 0, bestA = 0, id = 0;
-            for (let s0 = 0; s0 < N; s0++) {
-                if (!m[s0] || lab[s0]) continue;
-                id++; let sp = 0, a = 0; st[sp++] = s0; lab[s0] = id;
-                while (sp) {
-                    let p = st[--sp], x = p % w; a++;
-                    if (x > 0 && m[p - 1] && !lab[p - 1]) { lab[p - 1] = id; st[sp++] = p - 1; }
-                    if (x < w - 1 && m[p + 1] && !lab[p + 1]) { lab[p + 1] = id; st[sp++] = p + 1; }
-                    if (p >= w && m[p - w] && !lab[p - w]) { lab[p - w] = id; st[sp++] = p - w; }
-                    if (p < N - w && m[p + w] && !lab[p + w]) { lab[p + w] = id; st[sp++] = p + w; }
-                }
-                if (a > bestA) { bestA = a; best = id; }
-            }
-            if (bestA < N * 0.08) return null;
-            let pts = [];
-            for (let y = 0; y < h; y++) {
-                let l = -1, rr = -1;
-                for (let x = 0; x < w; x++) if (lab[y * w + x] === best) { if (l < 0) l = x; rr = x; }
-                if (l >= 0) { pts.push([l, y]); if (rr !== l) pts.push([rr, y]); }
-            }
-            // dışbükey zarf
-            pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+            if (cam.cfg.clothHue !== undefined) peaks.unshift(cam.cfg.clothHue);
             let cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-            let lo = [], up = [];
-            for (let p of pts) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
-            for (let i = pts.length - 1; i >= 0; i--) { let p = pts[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
-            let hull = lo.slice(0, -1).concat(up.slice(0, -1));
-            if (hull.length < 4) return null;
-            // en az alan kaybettiren köşeyi sil, 4 köşe kalana kadar
-            let tri = (a, b, c) => Math.abs(cr(a, b, c)) / 2;
-            while (hull.length > 4) {
-                let bi = 0, ba = 1e18;
-                for (let i = 0; i < hull.length; i++) {
-                    let a = tri(hull[(i - 1 + hull.length) % hull.length], hull[i], hull[(i + 1) % hull.length]);
-                    if (a < ba) { ba = a; bi = i; }
+            let polyA = P => { let s = 0; for (let i = 0; i < P.length; i++) { let a = P[i], b = P[(i + 1) % P.length]; s += a[0] * b[1] - b[0] * a[1]; } return Math.abs(s) / 2; };
+            let m = new Uint8Array(N), t = new Uint8Array(N), lab = new Int32Array(N), st = new Int32Array(N);
+            let bestQ = null, bestScore = 0, bestHue = 0;
+            for (let ch of peaks) {
+                m.fill(0);
+                for (let i = 0; i < N; i++) { if (!ok[i]) continue; let dd = Math.abs(hu[i] - ch) % 360; if ((dd > 180 ? 360 - dd : dd) < 20) m[i] = 1; }
+                // küçük delikleri kapat (toplar, gölgeler)
+                for (let k = 0; k < 2; k++) {
+                    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { let i = y * w + x; t[i] = m[i] | m[i - 1] | m[i + 1] | m[i - w] | m[i + w]; }
+                    m.set(t);
                 }
-                hull.splice(bi, 1);
+                // aşındır: çuhayı arka plandaki benzer renkli alanlara bağlayan ince köprüleri kopar
+                const ER = 5;
+                for (let k = 0; k < ER; k++) {
+                    t.fill(0);
+                    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { let i = y * w + x; t[i] = m[i] & m[i - 1] & m[i + 1] & m[i - w] & m[i + w]; }
+                    m.set(t);
+                }
+                lab.fill(0);
+                let best = 0, bestA = 0, id = 0;
+                for (let s0 = 0; s0 < N; s0++) {
+                    if (!m[s0] || lab[s0]) continue;
+                    id++; let sp = 0, a = 0; st[sp++] = s0; lab[s0] = id;
+                    while (sp) {
+                        let p = st[--sp], x = p % w; a++;
+                        if (x > 0 && m[p - 1] && !lab[p - 1]) { lab[p - 1] = id; st[sp++] = p - 1; }
+                        if (x < w - 1 && m[p + 1] && !lab[p + 1]) { lab[p + 1] = id; st[sp++] = p + 1; }
+                        if (p >= w && m[p - w] && !lab[p - w]) { lab[p - w] = id; st[sp++] = p - w; }
+                        if (p < N - w && m[p + w] && !lab[p + w]) { lab[p + w] = id; st[sp++] = p + w; }
+                    }
+                    if (a > bestA) { bestA = a; best = id; }
+                }
+                if (bestA < N * 0.04) continue;
+                let pts = [], touch = 0;
+                for (let y = 0; y < h; y++) {
+                    let l = -1, rr = -1;
+                    for (let x = 0; x < w; x++) if (lab[y * w + x] === best) { if (l < 0) l = x; rr = x; }
+                    if (l >= 0) { pts.push([l, y]); if (rr !== l) pts.push([rr, y]); if (l === 0 || rr === w - 1 || y === 0 || y === h - 1) touch++; }
+                }
+                pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+                let lo = [], up = [];
+                for (let p of pts) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+                for (let i = pts.length - 1; i >= 0; i--) { let p = pts[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+                let hull = lo.slice(0, -1).concat(up.slice(0, -1));
+                if (hull.length < 4) continue;
+                // aşındırılan payı geri ekle (merkezden dışarı)
+                let gx = 0, gy = 0; hull.forEach(p => { gx += p[0]; gy += p[1]; }); gx /= hull.length; gy /= hull.length;
+                hull = hull.map(([x, y]) => { let dx = x - gx, dy = y - gy, d = Math.hypot(dx, dy) || 1; return [x + dx / d * (ER - 2), y + dy / d * (ER - 2)]; });
+                let hullA = polyA(hull);
+                // en az alan kaybettiren köşeyi sil, 4 köşe kalana kadar
+                let tri = (a, b, c) => Math.abs(cr(a, b, c)) / 2;
+                while (hull.length > 4) {
+                    let bi = 0, ba = 1e18;
+                    for (let i = 0; i < hull.length; i++) {
+                        let a = tri(hull[(i - 1 + hull.length) % hull.length], hull[i], hull[(i + 1) % hull.length]);
+                        if (a < ba) { ba = a; bi = i; }
+                    }
+                    hull.splice(bi, 1);
+                }
+                let quadA = polyA(hull);
+                let solid = Math.min(1, bestA * 1.08 / Math.max(1, quadA));           // dörtgenin ne kadarı bu renkte (çuha ~0.85+)
+                let fit = Math.min(quadA, hullA) / Math.max(quadA, hullA); // şekil dörtgene ne kadar benziyor
+                let dd = Math.min(Math.abs(ch - 185), 360 - Math.abs(ch - 185));
+                let tone = dd < 70 ? 1.4 : 0.7;                    // mavi-yeşil çuha tonları öne
+                let edge = touch > h * 0.5 ? 0.4 : 1;              // ekranı kaplayan zemin/duvar değil
+                let score = Math.sqrt(bestA / N) * solid * solid * fit * tone * edge;
+                if (solid < 0.55 || fit < 0.75) score *= 0.2;
+                if (score > bestScore) { bestScore = score; bestQ = hull.map(p => [p[0] / w, p[1] / h]); bestHue = ch; }
             }
-            let q = hull.map(p => [p[0] / w, p[1] / h]);
+            if (!bestQ) return null;
+            let q = bestQ;
+            cam.cfg.clothHue = bestHue;
             // dörtgen yeterince büyük olmalı
             let area = Math.abs(cr(q[0], q[1], q[2]) + cr(q[0], q[2], q[3])) / 2;
-            if (area < 0.08) return null;
+            if (area < 0.04) return null;
             // ilk kenar uzun bant olsun (orta delikli)
             let len = (a, b) => Math.hypot((a[0] - b[0]) * v.videoWidth, (a[1] - b[1]) * v.videoHeight);
             if (len(q[0], q[1]) + len(q[2], q[3]) < len(q[1], q[2]) + len(q[3], q[0])) q = [q[1], q[2], q[3], q[0]];
