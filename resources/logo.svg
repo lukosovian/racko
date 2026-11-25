@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs><radialGradient id="bg" cx="50%" cy="32%" r="85%"><stop offset="0" stop-color="#3592d2"/><stop offset="0.55" stop-color="#1b5687"/><stop offset="1" stop-color="#081d31"/></radialGradient>
+  <radialGradient id="spot" cx="50%" cy="45%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity="0.16"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/><circle cx="512" cy="470" r="470" fill="url(#spot)"/><defs>
+    <radialGradient id="body" cx="36%" cy="30%" r="78%"><stop offset="0" stop-color="#5c5c5c"/><stop offset="0.5" stop-color="#161616"/><stop offset="1" stop-color="#000"/></radialGradient>
+    <radialGradient id="rim" cx="50%" cy="50%" r="50%"><stop offset="0.82" stop-color="#8ec5ff" stop-opacity="0"/><stop offset="0.97" stop-color="#8ec5ff" stop-opacity="0.35"/><stop offset="1" stop-color="#8ec5ff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="wh" cx="40%" cy="35%" r="75%"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d8dde3"/></radialGradient>
+    <radialGradient id="sh" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#000" stop-opacity="0.6"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+    <linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff0b8"/><stop offset="0.45" stop-color="#ffc21a"/><stop offset="1" stop-color="#b86e00"/></linearGradient>
+    <clipPath id="clip"><circle cx="512" cy="492" r="350"/></clipPath>
+  </defs>
+  <ellipse cx="540" cy="849" rx="332.5" ry="70" fill="url(#sh)"/>
+  <circle cx="512" cy="492" r="350" fill="url(#body)"/>
+  <g clip-path="url(#clip)">
+    <g transform="rotate(-129.28940686250039 467 437) scale(1) ">
+      <g transform="translate(467 437) scale(0.9791708278967882 1) translate(-467 -437)">
+        <circle cx="467" cy="437" r="204.05" fill="url(#gold)"/>
+        <circle cx="467" cy="437" r="185.5" fill="url(#wh)"/>
+      </g>
+    </g>
+    <g transform="translate(467 437) rotate(-12) scale(0.9947927069741971 1)">
+      <text x="0" y="76.05499999999999" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="218.89" fill="#0d2a44" >R</text>
+    </g>
+    <circle cx="512" cy="492" r="350" fill="url(#rim)"/>
+    <ellipse cx="337" cy="282" rx="91" ry="38.5" transform="rotate(-40 337 282)" fill="url(#hl)" opacity="0.75"/>
+    
+  </g></svg>

@@ -1,0 +1,8 @@
+{
+  "appId": "com.on5.scoreboard",
+  "appName": "Racko",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0b0f19"
+  }
+}

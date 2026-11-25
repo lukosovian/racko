@@ -1,0 +1,17 @@
+node_modules/
+*.apk
+*.mp4
+/IMG*.jpg
+/ON5_bugun_yapilanlar.png
+/ON5_studio/
+/yedek/
+/örnek/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/capacitor-cordova-android-plugins/build/
+*.keystore
+.claude/
+.release-notes.txt

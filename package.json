@@ -1,0 +1,31 @@
+{
+  "name": "racko",
+  "version": "1.0.0",
+  "description": "Racko bilardo skor tabelası",
+  "scripts": {
+    "logo": "node resources/make-icon.js && capacitor-assets generate --android --iconBackgroundColor #1b5687 --splashBackgroundColor #0a2238",
+    "apk": "cap sync android && cd android && .\\\\gradlew.bat assembleDebug && copy /Y app\\\\build\\\\outputs\\\\apk\\\\debug\\\\app-debug.apk ..\\\\Racko.apk",
+    "release": "node scripts/release.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/app": "^7.1.2",
+    "@capacitor/core": "^7.6.9",
+    "@capacitor/filesystem": "^7.1.9",
+    "@capacitor/haptics": "^7.0.5",
+    "@capacitor/share": "^7.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.6.9",
+    "sharp": "^0.35.5"
+  },
+  "allowScripts": {
+    "sharp@0.32.6": true,
+    "sharp@0.35.5": true
+  }
+}
